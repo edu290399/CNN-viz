@@ -20,7 +20,23 @@ const SECTIONS: NavSection[] = [
   { id: "conv", label: "Convolução", shape: "→ 8 × 8", icon: Filter, accent: PALETTE.kernel },
   { id: "relu", label: "Ativação ReLU", shape: "→ 8 × 8", icon: Zap, accent: PALETTE.positive },
   { id: "pool", label: "Max Pooling", shape: "→ 4 × 4", icon: Minimize2, accent: PALETTE.pool },
-  { id: "dense", label: "Flatten + Densa", shape: "→ 16 → 3", icon: Network, accent: PALETTE.dense },
+  { id: "dense", label: "Flatten + Densa", shape: "→ 16 → 14 → 3", icon: Network, accent: PALETTE.dense },
+];
+
+const PIPELINE_STEPS: Array<{ label: string; kind: "shape" | "op" }> = [
+  { label: "10×10", kind: "shape" },
+  { label: "conv 3×3", kind: "op" },
+  { label: "8×8", kind: "shape" },
+  { label: "ReLU", kind: "op" },
+  { label: "8×8", kind: "shape" },
+  { label: "pool 2×2", kind: "op" },
+  { label: "4×4", kind: "shape" },
+  { label: "flatten", kind: "op" },
+  { label: "16", kind: "shape" },
+  { label: "densa + ReLU", kind: "op" },
+  { label: "14", kind: "shape" },
+  { label: "densa + softmax", kind: "op" },
+  { label: "3", kind: "shape" },
 ];
 
 function cloneKernel(id: string): Matrix {
@@ -82,22 +98,22 @@ export default function Home() {
               se propagar até a classificação final.
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-2 font-mono text-xs">
-              {["10×10", "conv 3×3", "8×8", "ReLU", "8×8", "pool 2×2", "4×4", "flatten", "16", "densa", "3"].map(
-                (item, index) => (
-                  <span key={`${item}-${index}`} className="flex items-center gap-2">
-                    <span
-                      className={`rounded-md px-2 py-1 ${
-                        index % 2 === 0
-                          ? "bg-slate-800/80 text-slate-300"
-                          : "border border-slate-800 text-slate-500"
-                      }`}
-                    >
-                      {item}
-                    </span>
-                    {index < 10 ? <span className="text-slate-700">›</span> : null}
+              {PIPELINE_STEPS.map((item, index) => (
+                <span key={`${item.label}-${index}`} className="flex items-center gap-2">
+                  <span
+                    className={`rounded-md px-2 py-1 ${
+                      item.kind === "shape"
+                        ? "bg-slate-800/80 text-slate-300"
+                        : "border border-slate-800 text-slate-500"
+                    }`}
+                  >
+                    {item.label}
                   </span>
-                )
-              )}
+                  {index < PIPELINE_STEPS.length - 1 ? (
+                    <span className="text-slate-700">›</span>
+                  ) : null}
+                </span>
+              ))}
             </div>
           </header>
 
@@ -280,7 +296,7 @@ export default function Home() {
               id="dense"
               step={5}
               title="Flatten e camada densa: a decisão final"
-              subtitle="A matriz se desenrola em um vetor, e cada valor vota — com peso — em cada uma das classes possíveis."
+              subtitle="A matriz se desenrola em um vetor, passa por uma camada oculta e chega em três neurônios de saída."
               accent={PALETTE.dense}
               icon={Network}
               explanation={
@@ -295,23 +311,31 @@ export default function Home() {
                     &ldquo;quais padrões apareceram e com que força&rdquo;.
                   </p>
                   <p>
-                    A camada <strong className="text-slate-100">totalmente conectada</strong> liga
-                    cada uma das 16 entradas a cada neurônio de saída. Cada linha é um peso:{" "}
-                    <span className="text-emerald-300">verde</span> = essa evidência favorece a
-                    classe, <span className="text-rose-300">vermelho</span> = pesa contra. A
-                    espessura indica a importância.
-                  </p>
-                  <p>
-                    Cada neurônio soma tudo (<code>score = Σ wᵢ·xᵢ</code>), e o{" "}
-                    <strong className="text-slate-100">softmax</strong> converte os três scores em
-                    probabilidades que somam 100%.
+                    Vêm então duas camadas densas. Cada linha do diagrama é um peso:{" "}
+                    <span className="text-emerald-300">verde</span> soma evidência,{" "}
+                    <span className="text-rose-300">vermelho</span> subtrai, e a espessura mostra a
+                    importância. No fim, o <strong className="text-slate-100">softmax</strong>{" "}
+                    converte os três scores em probabilidades que somam 100%.
                   </p>
                   <p className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-cyan-100/80">
-                    <strong>Sobre os pesos:</strong> aqui eles não vêm de backpropagation. Passamos
-                    cada padrão de referência por este mesmo pipeline e usamos a assinatura
-                    resultante como peso da classe. Por isso trocar o kernel muda a qualidade da
-                    classificação — um filtro ruim gera assinaturas parecidas demais e a rede fica
-                    em dúvida.
+                    <strong>Por que existe uma camada oculta?</strong> Sem ela a rede errava. Depois
+                    da normalização, um X fica quase exatamente no <em>ponto médio</em> entre uma
+                    diagonal <code>\</code> e uma <code>/</code> — e nenhum classificador linear
+                    consegue separar o ponto médio de dois exemplos da mesma classe. Medido: só com
+                    a camada de saída, o acerto não passava de 70% nem nos próprios exemplos de
+                    treino. É pelo mesmo motivo que LeNet e VGG empilham camadas densas.
+                  </p>
+                  <p>
+                    As <strong className="text-slate-100">unidades ocultas</strong> acesas são as
+                    que dispararam para o seu desenho; as marcadas com{" "}
+                    <code className="text-slate-500">0</code> foram zeradas pelo ReLU. Cada uma
+                    aprendeu a procurar uma combinação diferente de regiões do vetor.
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Estes pesos são treinados de verdade, no seu navegador: retropropagação com Adam
+                    sobre ~1.700 exemplos gerados a partir dos gabaritos (variando espessura, falhas
+                    no traço e posição). O kernel, sim, continua sendo sua escolha — e é por isso
+                    que a qualidade da predição muda quando você troca o filtro.
                   </p>
                 </div>
               }
@@ -320,8 +344,9 @@ export default function Home() {
                 pooled={pipeline.pool.output}
                 flat={pipeline.flat}
                 poolScale={pipeline.scales.pool}
-                denseWeights={pipeline.denseWeights}
+                model={pipeline.model}
                 prediction={pipeline.prediction}
+                isTraining={pipeline.isTraining}
               />
             </SectionShell>
           </div>

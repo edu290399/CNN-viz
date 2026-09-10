@@ -1,6 +1,6 @@
 "use client";
 
-import { Eraser, Paintbrush, Trash2 } from "lucide-react";
+import { Eraser, HelpCircle, Paintbrush, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import MatrixGrid from "@/components/matrix/MatrixGrid";
 import Legend from "@/components/ui/Legend";
@@ -56,7 +56,7 @@ export default function InputLayer({
         <span className="mr-1 text-xs font-medium uppercase tracking-wider text-slate-500">
           Padrões
         </span>
-        {PATTERN_PRESETS.map((preset) => (
+        {PATTERN_PRESETS.filter((preset) => preset.trained).map((preset) => (
           <button
             key={preset.id}
             type="button"
@@ -78,6 +78,33 @@ export default function InputLayer({
           <Trash2 size={13} />
           Limpar
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className="mr-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-slate-500"
+          title="A rede nunca viu estas formas durante o treino"
+        >
+          <HelpCircle size={12} />
+          Fora do treino
+        </span>
+        {PATTERN_PRESETS.filter((preset) => !preset.trained).map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            onClick={() => onSelectPattern(preset.id)}
+            className={`rounded-lg border border-dashed px-3 py-1.5 text-xs font-medium transition ${
+              patternId === preset.id
+                ? "border-amber-400/60 bg-amber-400/10 text-amber-200"
+                : "border-slate-700 bg-transparent text-slate-400 hover:border-amber-500/50 hover:text-amber-200"
+            }`}
+          >
+            {preset.name}
+          </button>
+        ))}
+        <span className="text-xs text-slate-600">
+          não correspondem a nenhuma classe de saída
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

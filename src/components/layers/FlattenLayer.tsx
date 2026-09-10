@@ -6,8 +6,8 @@ import MatrixGrid from "@/components/matrix/MatrixGrid";
 import Legend from "@/components/ui/Legend";
 import PlaybackControls from "@/components/ui/PlaybackControls";
 import { useStepPlayer } from "@/hooks/useStepPlayer";
-import type { Prediction } from "@/lib/classifier";
-import { normalize, type FlatEntry, type Matrix } from "@/lib/cnn";
+import { inputInfluence, type DenseModel, type Prediction } from "@/lib/classifier";
+import type { FlatEntry, Matrix } from "@/lib/cnn";
 import { formatPrecise, formatSigned, PALETTE, poolColor } from "@/lib/colors";
 import { CLASSES } from "@/lib/patterns";
 
@@ -15,53 +15,83 @@ type FlattenLayerProps = {
   pooled: Matrix;
   flat: FlatEntry[];
   poolScale: number;
-  denseWeights: number[][];
+  model: DenseModel;
   prediction: Prediction;
+  isTraining: boolean;
 };
 
-// Geometria do diagrama (em unidades de viewBox do SVG).
-const SVG_W = 520;
+// Geometria do diagrama, em unidades de viewBox do SVG.
+const SVG_W = 560;
+const TOP = 26;
+const BOTTOM = 10;
 const CELL_H = 22;
 const CELL_GAP = 4;
-const CELL_W = 58;
-const VECTOR_X = 62;
-const NODE_X = 330;
-const NODE_W = 178;
+const CELL_W = 52;
+const VECTOR_X = 54;
+const HIDDEN_X = 252;
+const HIDDEN_R = 9;
+const NODE_X = 374;
+const NODE_W = 176;
 const NODE_H = 72;
 
 export default function FlattenLayer({
   pooled,
   flat,
   poolScale,
-  denseWeights,
+  model,
   prediction,
+  isTraining,
 }: FlattenLayerProps) {
   const player = useStepPlayer(flat.length, 160);
   const [hoveredNode, setHoveredNode] = useState<number | null>(null);
+  const [hoveredHidden, setHoveredHidden] = useState<number | null>(null);
   const [revealAll, setRevealAll] = useState(false);
 
   const activeIndex = player.index;
   const revealedCount = revealAll ? flat.length : activeIndex + 1;
 
-  const svgH = flat.length * (CELL_H + CELL_GAP) + 16;
-  const cellY = (i: number) => 8 + i * (CELL_H + CELL_GAP);
-  const nodeY = (j: number) => (svgH / CLASSES.length) * j + svgH / CLASSES.length / 2 - NODE_H / 2;
+  const hiddenCount = model.hidden.weights.length;
+  const svgH = TOP + flat.length * (CELL_H + CELL_GAP) + BOTTOM;
+  const innerH = svgH - TOP - BOTTOM;
 
-  const normalized = normalize(flat.map((e) => e.value));
-  const maxWeight = Math.max(...denseWeights.flat().map(Math.abs), 1e-6);
+  const cellY = (i: number) => TOP + i * (CELL_H + CELL_GAP);
+  const hiddenY = (h: number) => TOP + ((h + 0.5) * innerH) / hiddenCount;
+  const nodeY = (j: number) =>
+    TOP + (innerH / CLASSES.length) * j + innerH / CLASSES.length / 2 - NODE_H / 2;
+
+  const maxHiddenWeight = Math.max(
+    ...model.hidden.weights.flat().map(Math.abs),
+    1e-6
+  );
+  const maxOutputWeight = Math.max(
+    ...model.output.weights.flat().map(Math.abs),
+    1e-6
+  );
+  const maxActivation = Math.max(...prediction.hiddenActivations.map(Math.abs), 1e-6);
 
   const focusNode = hoveredNode ?? prediction.winnerIndex;
   const activeEntry = flat[activeIndex];
+  const influence = inputInfluence(model, prediction.features, focusNode);
+  const maxInfluence = Math.max(...influence.map(Math.abs), 1e-6);
 
   return (
     <div className="flex flex-col gap-6">
-      <PlaybackControls
-        player={player}
-        accent={PALETTE.dense}
-        status={`elemento ${activeIndex + 1} de ${flat.length}`}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PlaybackControls
+          player={player}
+          accent={PALETTE.dense}
+          status={`elemento ${activeIndex + 1} de ${flat.length}`}
+        />
+        <span className="font-mono text-xs text-slate-500">
+          {isTraining ? (
+            <span className="text-cyan-300">treinando com o novo kernel…</span>
+          ) : (
+            <>acurácia no treino: {(model.trainAccuracy * 100).toFixed(1)}%</>
+          )}
+        </span>
+      </div>
 
-      <div className="flex flex-wrap items-start justify-center gap-8">
+      <div className="flex flex-wrap items-start justify-center gap-6">
         <div className="flex flex-col items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider text-violet-300">
             Pooled {pooled.length}×{pooled[0]?.length ?? 0}
@@ -91,49 +121,91 @@ export default function FlattenLayer({
 
         <svg
           viewBox={`0 0 ${SVG_W} ${svgH}`}
-          className="h-auto w-full max-w-[560px]"
+          className="h-auto w-full max-w-[620px]"
           role="img"
-          aria-label="Vetor achatado conectado aos neurônios de saída"
+          aria-label="Vetor achatado conectado à camada oculta e aos neurônios de saída"
         >
-          {/* conexões: uma linha por (elemento do vetor, classe de saída) */}
-          {flat.map((entry, i) =>
+          <text x={VECTOR_X} y={14} fontSize={9.5} fill="#64748b" className="font-mono">
+            flatten ({flat.length})
+          </text>
+          <text
+            x={HIDDEN_X}
+            y={14}
+            textAnchor="middle"
+            fontSize={9.5}
+            fill="#64748b"
+            className="font-mono"
+          >
+            oculta ({hiddenCount}) · ReLU
+          </text>
+          <text x={NODE_X} y={14} fontSize={9.5} fill="#64748b" className="font-mono">
+            saída ({CLASSES.length}) · softmax
+          </text>
+
+          {/* flatten -> camada oculta */}
+          {flat.map((_, i) =>
             i < revealedCount
-              ? denseWeights.map((weights, j) => {
-                  const weight = weights[i] ?? 0;
-                  const strength = Math.abs(weight) / maxWeight;
-                  const isFocused = focusNode === j;
+              ? model.hidden.weights.map((row, h) => {
+                  const weight = row[i] ?? 0;
+                  const strength = Math.abs(weight) / maxHiddenWeight;
+                  const focused = hoveredHidden === h;
+                  const dimmed = hoveredHidden !== null && !focused;
                   return (
                     <line
-                      key={`${i}-${j}`}
+                      key={`i${i}-h${h}`}
                       x1={VECTOR_X + CELL_W}
                       y1={cellY(i) + CELL_H / 2}
-                      x2={NODE_X}
-                      y2={nodeY(j) + NODE_H / 2}
+                      x2={HIDDEN_X - HIDDEN_R}
+                      y2={hiddenY(h)}
                       stroke={weight >= 0 ? PALETTE.positive : PALETTE.negative}
-                      strokeWidth={0.4 + strength * 2.2}
-                      opacity={(isFocused ? 0.22 + strength * 0.75 : 0.05 + strength * 0.1)}
+                      strokeWidth={focused ? 0.5 + strength * 1.8 : 0.35 + strength * 0.7}
+                      opacity={
+                        focused ? 0.2 + strength * 0.7 : dimmed ? 0.015 : 0.03 + strength * 0.1
+                      }
                     />
                   );
                 })
               : null
           )}
 
+          {/* camada oculta -> saída */}
+          {model.output.weights.map((row, j) =>
+            row.map((weight, h) => {
+              const strength = Math.abs(weight) / maxOutputWeight;
+              const focused =
+                hoveredHidden !== null ? hoveredHidden === h : focusNode === j;
+              return (
+                <line
+                  key={`h${h}-o${j}`}
+                  x1={HIDDEN_X + HIDDEN_R}
+                  y1={hiddenY(h)}
+                  x2={NODE_X}
+                  y2={nodeY(j) + NODE_H / 2}
+                  stroke={weight >= 0 ? PALETTE.positive : PALETTE.negative}
+                  strokeWidth={focused ? 0.6 + strength * 2.4 : 0.4 + strength * 0.8}
+                  opacity={focused ? 0.25 + strength * 0.7 : 0.05 + strength * 0.12}
+                />
+              );
+            })
+          )}
+
           {/* o vetor 1D */}
           {flat.map((entry, i) => {
             const revealed = i < revealedCount;
+            const isCurrent = revealed && i === revealedCount - 1;
             return (
               <motion.g
                 key={entry.index}
                 initial={false}
-                animate={{ opacity: revealed ? 1 : 0.15 }}
+                animate={{ opacity: revealed ? 1 : 0.2 }}
                 transition={{ duration: 0.2 }}
               >
                 <text
-                  x={VECTOR_X - 8}
+                  x={VECTOR_X - 6}
                   y={cellY(i) + CELL_H / 2 + 3.5}
                   textAnchor="end"
                   className="font-mono"
-                  fontSize={9}
+                  fontSize={8.5}
                   fill="#64748b"
                 >
                   [{entry.row},{entry.col}]
@@ -145,10 +217,8 @@ export default function FlattenLayer({
                   height={CELL_H}
                   rx={4}
                   fill={revealed ? poolColor(entry.value, poolScale).background : "#0f172a"}
-                  stroke={
-                    revealed && i === revealedCount - 1 ? "#f8fafc" : "rgb(30 41 59)"
-                  }
-                  strokeWidth={revealed && i === revealedCount - 1 ? 1.8 : 1}
+                  stroke={isCurrent ? "#f8fafc" : "rgb(30 41 59)"}
+                  strokeWidth={isCurrent ? 1.8 : 1}
                   strokeDasharray={revealed ? undefined : "3 3"}
                 />
                 {revealed ? (
@@ -164,6 +234,51 @@ export default function FlattenLayer({
                   </text>
                 ) : null}
               </motion.g>
+            );
+          })}
+
+          {/* unidades da camada oculta: o preenchimento mostra quem disparou */}
+          {prediction.hiddenActivations.map((activation, h) => {
+            const intensity = activation / maxActivation;
+            const focused = hoveredHidden === h;
+            return (
+              <g
+                key={`hidden-${h}`}
+                onMouseEnter={() => setHoveredHidden(h)}
+                onMouseLeave={() => setHoveredHidden(null)}
+                className="cursor-pointer"
+              >
+                <circle
+                  cx={HIDDEN_X}
+                  cy={hiddenY(h)}
+                  r={HIDDEN_R + 6}
+                  fill="transparent"
+                />
+                <circle
+                  cx={HIDDEN_X}
+                  cy={hiddenY(h)}
+                  r={HIDDEN_R}
+                  fill={
+                    activation > 0
+                      ? `rgb(52 211 153 / ${(0.15 + intensity * 0.85).toFixed(2)})`
+                      : "rgb(15 23 42)"
+                  }
+                  stroke={focused ? "#f8fafc" : activation > 0 ? PALETTE.positive : "#334155"}
+                  strokeWidth={focused ? 2 : 1}
+                />
+                {activation <= 0 ? (
+                  <text
+                    x={HIDDEN_X}
+                    y={hiddenY(h) + 3}
+                    textAnchor="middle"
+                    fontSize={8}
+                    fill="#475569"
+                    className="font-mono"
+                  >
+                    0
+                  </text>
+                ) : null}
+              </g>
             );
           })}
 
@@ -210,15 +325,13 @@ export default function FlattenLayer({
                   rx={3.5}
                   fill="rgb(30 41 59)"
                 />
-                <motion.rect
+                <rect
                   x={NODE_X + 14}
                   y={y + 32}
+                  width={Math.max(probability * (NODE_W - 28), 2)}
                   height={7}
                   rx={3.5}
                   fill={isWinner ? PALETTE.dense : "#475569"}
-                  initial={false}
-                  animate={{ width: Math.max(probability * (NODE_W - 28), 2) }}
-                  transition={{ type: "spring", stiffness: 220, damping: 26 }}
                 />
                 <text
                   x={NODE_X + 14}
@@ -235,33 +348,55 @@ export default function FlattenLayer({
         </svg>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Elemento atual do vetor
           </p>
           {activeEntry ? (
-            <p className="font-mono text-sm text-slate-300">
-              x[{activeEntry.index}] ={" "}
-              <span className="text-violet-300">{formatSigned(activeEntry.value)}</span>{" "}
-              <span className="text-slate-500">
-                (veio da posição [{activeEntry.row}, {activeEntry.col}] do pooling)
-              </span>
-            </p>
+            <>
+              <p className="font-mono text-sm text-slate-300">
+                x[{activeEntry.index}] ={" "}
+                <span className="text-violet-300">{formatSigned(activeEntry.value)}</span>
+              </p>
+              <p className="mt-1 font-mono text-xs text-slate-500">
+                origem: pooling [{activeEntry.row}, {activeEntry.col}] · normalizado:{" "}
+                {formatPrecise(prediction.features[activeEntry.index] ?? 0)}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                influência em “{CLASSES[focusNode].label}”:{" "}
+                <span
+                  className="font-mono"
+                  style={{
+                    color:
+                      (influence[activeEntry.index] ?? 0) >= 0
+                        ? PALETTE.positive
+                        : PALETTE.negative,
+                  }}
+                >
+                  {formatPrecise(influence[activeEntry.index] ?? 0)}
+                </span>{" "}
+                <span className="text-slate-600">
+                  ({Math.round((Math.abs(influence[activeEntry.index] ?? 0) / maxInfluence) * 100)}
+                  % da maior)
+                </span>
+              </p>
+            </>
           ) : null}
-          <p className="mt-2 font-mono text-xs text-slate-500">
-            normalizado: {formatPrecise(normalized[activeIndex] ?? 0)} · peso para “
-            {CLASSES[focusNode].label}”:{" "}
-            <span
-              style={{
-                color:
-                  (denseWeights[focusNode]?.[activeIndex] ?? 0) >= 0
-                    ? PALETTE.positive
-                    : PALETTE.negative,
-              }}
-            >
-              {formatPrecise(denseWeights[focusNode]?.[activeIndex] ?? 0)}
-            </span>
+        </div>
+
+        <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Camada oculta
+          </p>
+          <p className="font-mono text-sm text-slate-300">
+            {prediction.hiddenActivations.filter((a) => a > 0).length} de {hiddenCount}{" "}
+            unidades ativas
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            As desligadas (marcadas com <span className="font-mono">0</span>) tiveram soma
+            negativa e o ReLU as zerou. Passe o mouse numa unidade para ver de onde ela tira
+            evidência.
           </p>
         </div>
 
@@ -273,8 +408,7 @@ export default function FlattenLayer({
             {CLASSES[prediction.winnerIndex].label}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            confiança de {(prediction.probabilities[prediction.winnerIndex] * 100).toFixed(1)}% —
-            resultado de softmax(W · x) sobre o vetor achatado.
+            confiança de {(prediction.probabilities[prediction.winnerIndex] * 100).toFixed(1)}%
           </p>
         </div>
       </div>
@@ -283,6 +417,7 @@ export default function FlattenLayer({
         items={[
           { color: PALETTE.positive, label: "peso positivo (evidência a favor)" },
           { color: PALETTE.negative, label: "peso negativo (evidência contra)" },
+          { color: PALETTE.positive, label: "unidade oculta ativa", outline: true },
           { color: PALETTE.dense, label: "neurônio vencedor" },
         ]}
       />

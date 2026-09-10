@@ -99,6 +99,39 @@ export function convolve2d(input: Matrix, kernel: Matrix): ConvResult {
   return { output, steps };
 }
 
+/**
+ * Mesma conta de `convolve2d`, mas sem gravar os passos intermediários.
+ *
+ * O treinamento da camada densa passa mais de mil imagens por aqui; guardar as
+ * submatrizes de cada posição (só úteis para a animação) dominava o tempo total.
+ */
+export function convolveFast(input: Matrix, kernel: Matrix): Matrix {
+  const inRows = input.length;
+  const inCols = input[0]?.length ?? 0;
+  const kRows = kernel.length;
+  const kCols = kernel[0]?.length ?? 0;
+
+  const outRows = inRows - kRows + 1;
+  const outCols = inCols - kCols + 1;
+  const output = createMatrix(Math.max(outRows, 0), Math.max(outCols, 0));
+
+  for (let r = 0; r < outRows; r++) {
+    for (let c = 0; c < outCols; c++) {
+      let sum = 0;
+      for (let kr = 0; kr < kRows; kr++) {
+        const inputRow = input[r + kr];
+        const kernelRow = kernel[kr];
+        for (let kc = 0; kc < kCols; kc++) {
+          sum += inputRow[c + kc] * kernelRow[kc];
+        }
+      }
+      output[r][c] = sum;
+    }
+  }
+
+  return output;
+}
+
 // ---------------------------------------------------------------------------
 // ReLU
 // ---------------------------------------------------------------------------
@@ -134,6 +167,31 @@ export type PoolResult = {
   output: Matrix;
   steps: PoolStep[];
 };
+
+/** Max pooling sem registrar as janelas — usado no treinamento. */
+export function maxPoolFast(input: Matrix, size = 2, stride = 2): Matrix {
+  const inRows = input.length;
+  const inCols = input[0]?.length ?? 0;
+  const outRows = Math.floor((inRows - size) / stride) + 1;
+  const outCols = Math.floor((inCols - size) / stride) + 1;
+  const output = createMatrix(Math.max(outRows, 0), Math.max(outCols, 0));
+
+  for (let r = 0; r < outRows; r++) {
+    for (let c = 0; c < outCols; c++) {
+      let max = -Infinity;
+      for (let wr = 0; wr < size; wr++) {
+        const row = input[r * stride + wr];
+        for (let wc = 0; wc < size; wc++) {
+          const value = row[c * stride + wc];
+          if (value > max) max = value;
+        }
+      }
+      output[r][c] = max;
+    }
+  }
+
+  return output;
+}
 
 export function maxPool2d(input: Matrix, size = 2, stride = 2): PoolResult {
   const { rows: inRows, cols: inCols } = matrixShape(input);

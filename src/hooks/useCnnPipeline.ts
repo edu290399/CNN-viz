@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useDeferredValue, useMemo } from "react";
 import {
   convolve2d,
   flatten,
@@ -12,15 +12,17 @@ import {
   type Matrix,
   type PoolResult,
 } from "@/lib/cnn";
-import { classify, computeDenseWeights, type Prediction } from "@/lib/classifier";
+import { classify, trainDenseLayer, type DenseModel, type Prediction } from "@/lib/classifier";
 
 export type CnnPipeline = {
   conv: ConvResult;
   activated: Matrix;
   pool: PoolResult;
   flat: FlatEntry[];
-  denseWeights: number[][];
+  model: DenseModel;
   prediction: Prediction;
+  /** `true` enquanto o modelo do kernel novo ainda está treinando. */
+  isTraining: boolean;
   /** Escalas de normalização para colorir cada matriz de forma coerente. */
   scales: {
     conv: number;
@@ -32,25 +34,33 @@ export type CnnPipeline = {
 
 /**
  * Recalcula todo o pipeline sempre que a imagem ou o kernel mudam.
- * Como as camadas são encadeadas, uma alteração num pixel se propaga
- * imediatamente até a predição final.
+ *
+ * As camadas convolucionais são baratas e rodam a cada alteração. O treino da
+ * camada densa custa ~150ms, então usa `useDeferredValue`: as matrizes e a
+ * animação respondem na hora e a predição chega logo depois, sem travar a
+ * digitação nos pesos do kernel.
  */
 export function useCnnPipeline(input: Matrix, kernel: Matrix): CnnPipeline {
+  const deferredKernel = useDeferredValue(kernel);
+  const isTraining = deferredKernel !== kernel;
+
+  const model = useMemo(() => trainDenseLayer(deferredKernel), [deferredKernel]);
+
   return useMemo(() => {
     const conv = convolve2d(input, kernel);
     const activated = relu(conv.output);
     const pool = maxPool2d(activated, 2, 2);
     const flat = flatten(pool.output);
-    const denseWeights = computeDenseWeights(kernel);
-    const prediction = classify(pool.output, denseWeights);
+    const prediction = classify(pool.output, model);
 
     return {
       conv,
       activated,
       pool,
       flat,
-      denseWeights,
+      model,
       prediction,
+      isTraining,
       scales: {
         conv: maxAbs(conv.output) || 1,
         activated: maxAbs(activated) || 1,
@@ -58,5 +68,5 @@ export function useCnnPipeline(input: Matrix, kernel: Matrix): CnnPipeline {
         kernel: maxAbs(kernel) || 1,
       },
     };
-  }, [input, kernel]);
+  }, [input, kernel, model, isTraining]);
 }

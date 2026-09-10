@@ -6,6 +6,12 @@ export type PatternPreset = {
   id: string;
   name: string;
   ascii: string[];
+  /**
+   * `false` para formas que não pertencem a nenhuma das classes de saída.
+   * Servem para explorar a convolução e para mostrar como a rede se comporta
+   * diante de algo que nunca viu no treino.
+   */
+  trained?: boolean;
 };
 
 /**
@@ -16,6 +22,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
   {
     id: "x",
     name: "Letra X",
+    trained: true,
     ascii: [
       "..........",
       ".#......#.",
@@ -32,6 +39,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
   {
     id: "circle",
     name: "Círculo",
+    trained: true,
     ascii: [
       "...####...",
       "..#....#..",
@@ -48,6 +56,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
   {
     id: "diagonal",
     name: "Linha Diagonal",
+    trained: true,
     ascii: [
       "#.........",
       ".#........",
@@ -64,6 +73,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
   {
     id: "vertical",
     name: "Linha Vertical",
+    trained: true,
     ascii: [
       "....##....",
       "....##....",
@@ -80,6 +90,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
   {
     id: "square",
     name: "Quadrado",
+    trained: false,
     ascii: [
       "..........",
       ".########.",
@@ -96,6 +107,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
   {
     id: "cross",
     name: "Cruz",
+    trained: false,
     ascii: [
       "....##....",
       "....##....",
@@ -122,11 +134,14 @@ export function blankPattern(): Matrix {
   );
 }
 
-/** As classes que a camada totalmente conectada tenta distinguir. */
+/**
+ * As classes que a camada totalmente conectada tenta distinguir. A ordem importa:
+ * é a mesma de `CLASS_TEMPLATES`, em `training.ts`.
+ */
 export const CLASSES = [
-  { id: "x", label: "É um X", patternId: "x" },
-  { id: "circle", label: "É um Círculo", patternId: "circle" },
-  { id: "diagonal", label: "É uma Linha", patternId: "diagonal" },
+  { id: "x", label: "É um X" },
+  { id: "circle", label: "É um Círculo" },
+  { id: "diagonal", label: "É uma Linha" },
 ] as const;
 
 export type ClassId = (typeof CLASSES)[number]["id"];
