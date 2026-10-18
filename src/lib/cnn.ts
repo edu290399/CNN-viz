@@ -55,9 +55,27 @@ export type ConvResult = {
   steps: ConvStep[];
 };
 
-/** Convolução 2D com stride 1 e sem padding (saída encolhe em `kernel - 1`). */
-export function convolve2d(input: Matrix, kernel: Matrix): ConvResult {
-  const { rows: inRows, cols: inCols } = matrixShape(input);
+/**
+ * Cerca a matriz com `pad` pixels de valor `fill` (zero-padding).
+ * Sem isso, um kernel 3×3 nunca centra nos pixels da borda — e é justamente
+ * ali que um detector de bordas mais precisa olhar.
+ */
+export function padMatrix(input: Matrix, pad: number, fill = 0): Matrix {
+  if (pad <= 0) return input;
+  const { rows, cols } = matrixShape(input);
+  const out = createMatrix(rows + 2 * pad, cols + 2 * pad, fill);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      out[r + pad][c + pad] = input[r][c];
+    }
+  }
+  return out;
+}
+
+/** Convolução 2D com stride 1. Sem padding a saída encolhe em `kernel - 1`. */
+export function convolve2d(input: Matrix, kernel: Matrix, padding = 0): ConvResult {
+  const work = padMatrix(input, padding);
+  const { rows: inRows, cols: inCols } = matrixShape(work);
   const { rows: kRows, cols: kCols } = matrixShape(kernel);
 
   const outRows = inRows - kRows + 1;
@@ -74,7 +92,7 @@ export function convolve2d(input: Matrix, kernel: Matrix): ConvResult {
 
       for (let kr = 0; kr < kRows; kr++) {
         for (let kc = 0; kc < kCols; kc++) {
-          const value = input[r + kr][c + kc];
+          const value = work[r + kr][c + kc];
           const product = value * kernel[kr][kc];
           patch[kr][kc] = value;
           products[kr][kc] = product;
@@ -105,9 +123,10 @@ export function convolve2d(input: Matrix, kernel: Matrix): ConvResult {
  * O treinamento da camada densa passa mais de mil imagens por aqui; guardar as
  * submatrizes de cada posição (só úteis para a animação) dominava o tempo total.
  */
-export function convolveFast(input: Matrix, kernel: Matrix): Matrix {
-  const inRows = input.length;
-  const inCols = input[0]?.length ?? 0;
+export function convolveFast(input: Matrix, kernel: Matrix, padding = 0): Matrix {
+  const work = padMatrix(input, padding);
+  const inRows = work.length;
+  const inCols = work[0]?.length ?? 0;
   const kRows = kernel.length;
   const kCols = kernel[0]?.length ?? 0;
 
@@ -119,7 +138,7 @@ export function convolveFast(input: Matrix, kernel: Matrix): Matrix {
     for (let c = 0; c < outCols; c++) {
       let sum = 0;
       for (let kr = 0; kr < kRows; kr++) {
-        const inputRow = input[r + kr];
+        const inputRow = work[r + kr];
         const kernelRow = kernel[kr];
         for (let kc = 0; kc < kCols; kc++) {
           sum += inputRow[c + kc] * kernelRow[kc];

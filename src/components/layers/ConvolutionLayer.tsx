@@ -8,7 +8,7 @@ import MatrixGrid from "@/components/matrix/MatrixGrid";
 import Legend from "@/components/ui/Legend";
 import PlaybackControls from "@/components/ui/PlaybackControls";
 import { useStepPlayer } from "@/hooks/useStepPlayer";
-import type { ConvResult, Matrix } from "@/lib/cnn";
+import { padMatrix, type ConvResult, type Matrix } from "@/lib/cnn";
 import {
   formatIntensity,
   formatSigned,
@@ -21,6 +21,7 @@ import {
 type ConvolutionLayerProps = {
   input: Matrix;
   kernel: Matrix;
+  padding?: number;
   conv: ConvResult;
   scale: number;
   valueScale: ValueScale;
@@ -31,6 +32,7 @@ type ConvolutionLayerProps = {
 export default function ConvolutionLayer({
   input,
   kernel,
+  padding = 0,
   conv,
   scale,
   valueScale,
@@ -44,6 +46,15 @@ export default function ConvolutionLayer({
   const activeIndex = hoveredIndex ?? player.index;
   const activeStep = conv.steps[activeIndex] ?? null;
   const outCols = conv.output[0]?.length ?? 0;
+  const display = padMatrix(input, padding);
+  const displayRows = display.length;
+  const displayCols = display[0]?.length ?? 0;
+  const isPadCell = (row: number, col: number) =>
+    padding > 0 &&
+    (row < padding ||
+      col < padding ||
+      row >= displayRows - padding ||
+      col >= displayCols - padding);
 
   const isRevealed = (row: number, col: number) =>
     revealAll || row * outCols + col <= activeIndex;
@@ -52,6 +63,7 @@ export default function ConvolutionLayer({
     <div className="flex flex-col gap-6">
       <KernelEditor
         weights={kernel}
+        padding={padding}
         onChange={onKernelChange}
         onSelectPreset={onSelectPreset}
       />
@@ -67,12 +79,18 @@ export default function ConvolutionLayer({
       <div className="flex flex-wrap items-center justify-center gap-6">
         <div className="flex flex-col items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider text-sky-300">
-            Entrada {input.length}×{input[0]?.length ?? 0}
+            {padding > 0
+              ? `Entrada ${input.length}×${input[0]?.length ?? 0} + pad ${padding}`
+              : `Entrada ${input.length}×${input[0]?.length ?? 0}`}
           </span>
           <MatrixGrid
-            matrix={input}
-            cellSize={34}
-            colorFor={(value) => inputColor(value)}
+            matrix={display}
+            cellSize={padding > 0 ? 28 : 34}
+            colorFor={(value, row, col) =>
+              isPadCell(row, col)
+                ? { background: "rgb(15 23 42)", color: "#64748b" }
+                : inputColor(value)
+            }
             formatValue={(value) => formatIntensity(value, valueScale)}
             highlight={
               activeStep
@@ -86,6 +104,7 @@ export default function ConvolutionLayer({
                 : null
             }
             cellState={(row, col) => {
+              if (isPadCell(row, col)) return { ring: "rgb(71 85 105 / 0.9)" };
               if (!activeStep) return undefined;
               const inWindow =
                 row >= activeStep.inRow &&
@@ -105,7 +124,7 @@ export default function ConvolutionLayer({
           </span>
           <MatrixGrid
             matrix={conv.output}
-            cellSize={34}
+            cellSize={padding > 0 ? 28 : 34}
             colorFor={(value) => signedColor(value, scale)}
             formatValue={formatSigned}
             onCellHover={(row, col) => {
@@ -142,6 +161,9 @@ export default function ConvolutionLayer({
           { color: PALETTE.positive, label: "resposta positiva" },
           { color: PALETTE.negative, label: "resposta negativa" },
           { color: "#334155", label: "ainda não calculado" },
+          ...(padding > 0
+            ? [{ color: "#475569", label: "zero-padding (borda artificial)", outline: true }]
+            : []),
         ]}
       />
     </div>

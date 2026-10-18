@@ -72,8 +72,8 @@ export function extractFeatures(pooled: Matrix): number[] {
 }
 
 /** Roda conv -> ReLU -> pool e devolve o vetor de características normalizado. */
-export function featuresFor(input: Matrix, kernel: Matrix): number[] {
-  const pooled = maxPoolFast(relu(convolveFast(input, kernel)), 2, 2);
+export function featuresFor(input: Matrix, kernel: Matrix, padding = 0): number[] {
+  const pooled = maxPoolFast(relu(convolveFast(input, kernel, padding)), 2, 2);
   return extractFeatures(pooled);
 }
 
@@ -99,7 +99,7 @@ type Dataset = {
   sampleWeights: number[];
 };
 
-function buildDataset(kernel: Matrix): Dataset {
+function buildDataset(kernel: Matrix, padding = 0): Dataset {
   const features: number[][] = [];
   const labels: number[] = [];
   const perClassCount: number[] = [];
@@ -108,7 +108,7 @@ function buildDataset(kernel: Matrix): Dataset {
     const samples = classSamples(classIndex);
     perClassCount[classIndex] = samples.length;
     for (const sample of samples) {
-      features.push(featuresFor(sample, kernel));
+      features.push(featuresFor(sample, kernel, padding));
       labels.push(classIndex);
     }
   });
@@ -131,9 +131,10 @@ function zerosLike(rows: number, cols: number): number[][] {
 
 export function trainDenseLayer(
   kernel: Matrix,
-  options: TrainingOptions = DEFAULT_TRAINING
+  options: TrainingOptions = DEFAULT_TRAINING,
+  padding = 0
 ): DenseModel {
-  const { features, labels, sampleWeights } = buildDataset(kernel);
+  const { features, labels, sampleWeights } = buildDataset(kernel, padding);
   const numClasses = CLASSES.length;
   const dim = features[0]?.length ?? 0;
   const hiddenSize = options.hiddenUnits;

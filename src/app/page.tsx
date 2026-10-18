@@ -15,29 +15,13 @@ import { PALETTE, type ValueScale } from "@/lib/colors";
 import { DEFAULT_KERNEL_ID, getKernelPreset } from "@/lib/kernels";
 import { blankPattern, CLASSES, getPattern } from "@/lib/patterns";
 
-const SECTIONS: NavSection[] = [
-  { id: "input", label: "Camada de Entrada", shape: "10 × 10 × 1", icon: ImageIcon, accent: PALETTE.input },
-  { id: "conv", label: "Convolução", shape: "→ 8 × 8", icon: Filter, accent: PALETTE.kernel },
-  { id: "relu", label: "Ativação ReLU", shape: "→ 8 × 8", icon: Zap, accent: PALETTE.positive },
-  { id: "pool", label: "Max Pooling", shape: "→ 4 × 4", icon: Minimize2, accent: PALETTE.pool },
-  { id: "dense", label: "Flatten + Densa", shape: "→ 16 → 14 → 3", icon: Network, accent: PALETTE.dense },
-];
-
-const PIPELINE_STEPS: Array<{ label: string; kind: "shape" | "op" }> = [
-  { label: "10×10", kind: "shape" },
-  { label: "conv 3×3", kind: "op" },
-  { label: "8×8", kind: "shape" },
-  { label: "ReLU", kind: "op" },
-  { label: "8×8", kind: "shape" },
-  { label: "pool 2×2", kind: "op" },
-  { label: "4×4", kind: "shape" },
-  { label: "flatten", kind: "op" },
-  { label: "16", kind: "shape" },
-  { label: "densa + ReLU", kind: "op" },
-  { label: "14", kind: "shape" },
-  { label: "densa + softmax", kind: "op" },
-  { label: "3", kind: "shape" },
-];
+const SECTION_META = [
+  { id: "input", label: "Camada de Entrada", icon: ImageIcon, accent: PALETTE.input },
+  { id: "conv", label: "Convolução", icon: Filter, accent: PALETTE.kernel },
+  { id: "relu", label: "Ativação ReLU", icon: Zap, accent: PALETTE.positive },
+  { id: "pool", label: "Max Pooling", icon: Minimize2, accent: PALETTE.pool },
+  { id: "dense", label: "Flatten + Densa", icon: Network, accent: PALETTE.dense },
+] as const;
 
 function cloneKernel(id: string): Matrix {
   const preset = getKernelPreset(id);
@@ -48,9 +32,40 @@ export default function Home() {
   const [input, setInput] = useState<Matrix>(() => getPattern("x"));
   const [patternId, setPatternId] = useState<string | null>("x");
   const [kernel, setKernel] = useState<Matrix>(() => cloneKernel(DEFAULT_KERNEL_ID));
+  const [padding, setPadding] = useState(0);
   const [valueScale, setValueScale] = useState<ValueScale>("unit");
 
-  const pipeline = useCnnPipeline(input, kernel);
+  const pipeline = useCnnPipeline(input, kernel, padding);
+
+  const convRows = pipeline.conv.output.length;
+  const convCols = pipeline.conv.output[0]?.length ?? 0;
+  const poolRows = pipeline.pool.output.length;
+  const poolCols = pipeline.pool.output[0]?.length ?? 0;
+  const flatLen = pipeline.flat.length;
+
+  const sections: NavSection[] = [
+    { ...SECTION_META[0], shape: "10 × 10 × 1" },
+    { ...SECTION_META[1], shape: `→ ${convRows} × ${convCols}` },
+    { ...SECTION_META[2], shape: `→ ${convRows} × ${convCols}` },
+    { ...SECTION_META[3], shape: `→ ${poolRows} × ${poolCols}` },
+    { ...SECTION_META[4], shape: `→ ${flatLen} → 14 → 3` },
+  ];
+
+  const pipelineSteps: Array<{ label: string; kind: "shape" | "op" }> = [
+    { label: "10×10", kind: "shape" },
+    { label: padding > 0 ? "conv 3×3 pad1" : "conv 3×3", kind: "op" },
+    { label: `${convRows}×${convCols}`, kind: "shape" },
+    { label: "ReLU", kind: "op" },
+    { label: `${convRows}×${convCols}`, kind: "shape" },
+    { label: "pool 2×2", kind: "op" },
+    { label: `${poolRows}×${poolCols}`, kind: "shape" },
+    { label: "flatten", kind: "op" },
+    { label: String(flatLen), kind: "shape" },
+    { label: "densa + ReLU", kind: "op" },
+    { label: "14", kind: "shape" },
+    { label: "densa + softmax", kind: "op" },
+    { label: "3", kind: "shape" },
+  ];
 
   const handlePaint = useCallback((row: number, col: number, value: number) => {
     setInput((prev) => {
@@ -73,13 +88,15 @@ export default function Home() {
   }, []);
 
   const handleSelectPreset = useCallback((id: string) => {
+    const preset = getKernelPreset(id);
     setKernel(cloneKernel(id));
+    setPadding(preset?.padding ?? 0);
   }, []);
 
   return (
     <div className="flex min-h-screen bg-slate-950">
       <Sidebar
-        sections={SECTIONS}
+        sections={sections}
         prediction={{
           label: CLASSES[pipeline.prediction.winnerIndex].label,
           confidence: pipeline.prediction.probabilities[pipeline.prediction.winnerIndex],
@@ -98,7 +115,7 @@ export default function Home() {
               se propagar até a classificação final.
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-2 font-mono text-xs">
-              {PIPELINE_STEPS.map((item, index) => (
+              {pipelineSteps.map((item, index) => (
                 <span key={`${item.label}-${index}`} className="flex items-center gap-2">
                   <span
                     className={`rounded-md px-2 py-1 ${
@@ -109,7 +126,7 @@ export default function Home() {
                   >
                     {item.label}
                   </span>
-                  {index < PIPELINE_STEPS.length - 1 ? (
+                  {index < pipelineSteps.length - 1 ? (
                     <span className="text-slate-700">›</span>
                   ) : null}
                 </span>
@@ -181,9 +198,28 @@ export default function Home() {
                     <li>somar os 9 produtos — isso vira um único pixel de saída.</li>
                   </ol>
                   <p>
-                    Depois o kernel anda uma casa (<code>stride = 1</code>) e repete. Como ele não
-                    ultrapassa as bordas, a saída encolhe:{" "}
-                    <code className="text-orange-300">10 − 3 + 1 = 8</code>.
+                    Depois o kernel anda uma casa (<code>stride = 1</code>) e repete.
+                    {padding > 0 ? (
+                      <>
+                        {" "}
+                        Com <strong className="text-slate-100">zero-padding</strong> de {padding}, a
+                        imagem ganha uma moldura de zeros e o filtro também centra nos pixels da
+                        borda. A saída fica{" "}
+                        <code className="text-orange-300">
+                          {convRows}×{convCols}
+                        </code>{" "}
+                        — o mesmo tamanho da entrada. Sem isso, o contorno seria cortado, justamente
+                        onde um detector de bordas mais precisa olhar.
+                      </>
+                    ) : (
+                      <>
+                        {" "}
+                        Sem padding ele não ultrapassa as bordas, então a saída encolhe:{" "}
+                        <code className="text-orange-300">10 − 3 + 1 = 8</code>. Escolha{" "}
+                        <em>Detector de Bordas + padding</em> para ver o kernel varrer também o
+                        contorno.
+                      </>
+                    )}
                   </p>
                   <p className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 text-orange-100/80">
                     <strong>O ponto central:</strong> os mesmos 9 pesos são reutilizados na imagem
@@ -201,6 +237,7 @@ export default function Home() {
               <ConvolutionLayer
                 input={input}
                 kernel={kernel}
+                padding={padding}
                 conv={pipeline.conv}
                 scale={pipeline.scales.conv}
                 valueScale={valueScale}
@@ -263,8 +300,15 @@ export default function Home() {
                 <div className="space-y-3">
                   <p>
                     A janela não se sobrepõe: o <code>stride = 2</code> é igual ao tamanho dela.
-                    Cada grupo de 4 valores vira 1, então <code>8×8</code> vira{" "}
-                    <code className="text-violet-300">4×4</code> — 75% dos dados desaparecem.
+                    Cada grupo de 4 valores vira 1, então{" "}
+                    <code>
+                      {convRows}×{convCols}
+                    </code>{" "}
+                    vira{" "}
+                    <code className="text-violet-300">
+                      {poolRows}×{poolCols}
+                    </code>{" "}
+                    — cerca de 75% dos dados desaparecem.
                   </p>
                   <p>
                     Guardar o <strong className="text-slate-100">máximo</strong> tem um significado
@@ -303,8 +347,8 @@ export default function Home() {
                 <div className="space-y-3">
                   <p>
                     O <strong className="text-slate-100">flatten</strong> é a operação mais simples
-                    de todas: leia a matriz 4×4 linha por linha e empilhe os valores num vetor de 16
-                    posições. Nenhuma conta, só reorganização.
+                    de todas: leia a matriz {poolRows}×{poolCols} linha por linha e empilhe os
+                    valores num vetor de {flatLen} posições. Nenhuma conta, só reorganização.
                   </p>
                   <p>
                     A partir daí a estrutura espacial foi abandonada. O que sobrou é uma lista de

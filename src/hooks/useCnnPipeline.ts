@@ -12,7 +12,14 @@ import {
   type Matrix,
   type PoolResult,
 } from "@/lib/cnn";
-import { classify, trainDenseLayer, type DenseModel, type Prediction } from "@/lib/classifier";
+import {
+  classify,
+  HIDDEN_UNITS,
+  trainDenseLayer,
+  type DenseModel,
+  type Prediction,
+} from "@/lib/classifier";
+import { CLASSES } from "@/lib/patterns";
 
 export type CnnPipeline = {
   conv: ConvResult;
@@ -32,26 +39,48 @@ export type CnnPipeline = {
   };
 };
 
+function placeholderPrediction(featureCount: number): Prediction {
+  const n = CLASSES.length;
+  return {
+    features: Array.from({ length: featureCount }, () => 0),
+    hiddenActivations: Array.from({ length: HIDDEN_UNITS }, () => 0),
+    scores: Array.from({ length: n }, () => 0),
+    probabilities: Array.from({ length: n }, () => 1 / n),
+    winnerIndex: 0,
+  };
+}
+
 /**
- * Recalcula todo o pipeline sempre que a imagem ou o kernel mudam.
+ * Recalcula todo o pipeline sempre que a imagem, o kernel ou o padding mudam.
  *
  * As camadas convolucionais são baratas e rodam a cada alteração. O treino da
  * camada densa custa ~150ms, então usa `useDeferredValue`: as matrizes e a
  * animação respondem na hora e a predição chega logo depois, sem travar a
  * digitação nos pesos do kernel.
  */
-export function useCnnPipeline(input: Matrix, kernel: Matrix): CnnPipeline {
+export function useCnnPipeline(
+  input: Matrix,
+  kernel: Matrix,
+  padding = 0
+): CnnPipeline {
   const deferredKernel = useDeferredValue(kernel);
-  const isTraining = deferredKernel !== kernel;
+  const deferredPadding = useDeferredValue(padding);
 
-  const model = useMemo(() => trainDenseLayer(deferredKernel), [deferredKernel]);
+  const model = useMemo(
+    () => trainDenseLayer(deferredKernel, undefined, deferredPadding),
+    [deferredKernel, deferredPadding]
+  );
 
   return useMemo(() => {
-    const conv = convolve2d(input, kernel);
+    const conv = convolve2d(input, kernel, padding);
     const activated = relu(conv.output);
     const pool = maxPool2d(activated, 2, 2);
     const flat = flatten(pool.output);
-    const prediction = classify(pool.output, model);
+    const modelDim = model.hidden.weights[0]?.length ?? 0;
+    const ready = modelDim === flat.length;
+    const prediction = ready
+      ? classify(pool.output, model)
+      : placeholderPrediction(flat.length);
 
     return {
       conv,
@@ -60,7 +89,7 @@ export function useCnnPipeline(input: Matrix, kernel: Matrix): CnnPipeline {
       flat,
       model,
       prediction,
-      isTraining,
+      isTraining: !ready || deferredKernel !== kernel || deferredPadding !== padding,
       scales: {
         conv: maxAbs(conv.output) || 1,
         activated: maxAbs(activated) || 1,
@@ -68,5 +97,5 @@ export function useCnnPipeline(input: Matrix, kernel: Matrix): CnnPipeline {
         kernel: maxAbs(kernel) || 1,
       },
     };
-  }, [input, kernel, model, isTraining]);
+  }, [input, kernel, padding, model, deferredKernel, deferredPadding]);
 }

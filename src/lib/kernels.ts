@@ -6,6 +6,8 @@ export type KernelPreset = {
   /** Explicação curta de "o que este filtro procura". */
   description: string;
   weights: Matrix;
+  /** Zero-padding em cada lado. `1` num kernel 3×3 preserva o tamanho da entrada. */
+  padding?: number;
 };
 
 export const KERNEL_PRESETS: KernelPreset[] = [
@@ -14,6 +16,18 @@ export const KERNEL_PRESETS: KernelPreset[] = [
     name: "Detector de Bordas",
     description:
       "Laplaciano: soma zero. Regiões uniformes se anulam e só sobram as transições de intensidade.",
+    weights: [
+      [-1, -1, -1],
+      [-1, 8, -1],
+      [-1, -1, -1],
+    ],
+  },
+  {
+    id: "edge-pad",
+    name: "Detector de Bordas + padding",
+    description:
+      "O mesmo Laplaciano, com uma moldura de zeros (padding = 1). O kernel também centra nos pixels da borda, então o contorno da figura não é cortado — a saída fica do mesmo tamanho da entrada.",
+    padding: 1,
     weights: [
       [-1, -1, -1],
       [-1, 8, -1],
@@ -94,11 +108,13 @@ export function getKernelPreset(id: string): KernelPreset | undefined {
   return KERNEL_PRESETS.find((k) => k.id === id);
 }
 
-/** Descobre se uma matriz de pesos corresponde a algum preset (tolerância p/ float). */
-export function matchPreset(weights: Matrix): KernelPreset | undefined {
-  return KERNEL_PRESETS.find((preset) =>
-    preset.weights.every((row, r) =>
-      row.every((v, c) => Math.abs(v - weights[r][c]) < 1e-6)
-    )
+/** Descobre se pesos + padding correspondem a algum preset (tolerância p/ float). */
+export function matchPreset(weights: Matrix, padding = 0): KernelPreset | undefined {
+  return KERNEL_PRESETS.find(
+    (preset) =>
+      (preset.padding ?? 0) === padding &&
+      preset.weights.every((row, r) =>
+        row.every((v, c) => Math.abs(v - weights[r][c]) < 1e-6)
+      )
   );
 }

@@ -7,6 +7,7 @@ import { KERNEL_PRESETS, matchPreset } from "@/lib/kernels";
 
 type KernelEditorProps = {
   weights: Matrix;
+  padding?: number;
   onChange: (weights: Matrix) => void;
   onSelectPreset: (id: string) => void;
   compact?: boolean;
@@ -18,11 +19,12 @@ function roundForInput(value: number): number {
 
 export default function KernelEditor({
   weights,
+  padding = 0,
   onChange,
   onSelectPreset,
   compact = false,
 }: KernelEditorProps) {
-  const preset = matchPreset(weights);
+  const preset = matchPreset(weights, padding);
   const scale = Math.max(...weights.flat().map(Math.abs), 1);
   const sum = weights.flat().reduce((a, b) => a + b, 0);
 
@@ -88,6 +90,10 @@ export default function KernelEditor({
             {preset
               ? preset.description
               : "Você editou os pesos manualmente. Experimente: soma zero tende a detectar bordas, soma um preserva o brilho médio da imagem."}
+          </p>
+          <p className="font-mono text-xs text-slate-500">
+            padding = {padding}
+            {padding > 0 ? " · same padding: a saída não encolhe" : " · valid: a saída encolhe nas bordas"}
           </p>
           <p className="text-xs leading-relaxed text-slate-500">
             {Math.abs(sum) < 1e-6
